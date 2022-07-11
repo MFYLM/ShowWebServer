@@ -1,12 +1,11 @@
-
-
 // require function is used to evoke dependencies
 const express = require("express");
 const app = express();
 const bodyParser = require("body-parser");
 const mysql = require("mysql");
 const cors = require("cors");
-
+const jwt = require("jsonwebtoken");
+const config = require("./config");
 
 // bcrypt dependency is used to hash use password, which secures user's information
 const bcrypt = require("bcrypt");       
@@ -23,24 +22,25 @@ const session = require("express-session");         // maintaining session, so w
 // for accessing sql, we need to consider grant ability to current user to modify the database
 const db = mysql.createPool({
     host: "localhost",
-    user: "root",
-    password: "Maf200927#MFY",
+    user: config.databaseAcess.user,
+    password: config.databaseAcess.password,
     database: "test"
 });
 
 
 app.use(cors({
     origin: ["http://localhost:3000"],          // origin url
-    methods: ["GET", "POST"],
+    methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true
 }));                          // avoid CORS error for the same domain
+
 
 app.use(express.json());                                // grabbing information from frontend as json file
 app.use(bodyParser.urlencoded({extended: true}));       // convert sended object to json file
 app.use(cookieParser());
 app.use(session({
     key: "userID",
-    secret: "my secret",
+    secret: "my react express secret",
     resave: false,
     saveUninitialized: false,
     cookie: {
@@ -139,14 +139,35 @@ app.post("/register", (req, res) => {
 });
 
 
+const verifyJWT = (req, res, next) => {
+    const token = req.headers["user-access-token"];
+    if (!token)
+        res.send({ message: "No valid token!" });
+    else
+    {
+        jwt.verify(token, "jwtSecret", (err, encoded) => {
+            if (err)
+            {
+                res.json({ auth: false, message: "failed to authentication!" });
+            }
+            else
+            {
+                req.userId = encoded.id;
+                next();
+            }
+        })
+    }
+};
 
-// get method to maintain user session, which should be done for every page we have on based url
-app.get("/login", (req, res) => {
+
+// get method to maintain user session + verify token, which should be good for every page we have on based url
+app.get("/login", verifyJWT, (req, res) => {
     if (req.session.user)
         res.send({ isLogin: true, user: req.session.user });
     else
         res.send({ isLogin: false });
 });
+
 
 // post method is used to send information through network
 app.post("/login", (req, res) => {
@@ -164,17 +185,23 @@ app.post("/login", (req, res) => {
             bcrypt.compare(password, result[0].password, (error, compareResult) => {
                 if (compareResult)
                 {
+                    const id = result[0].id;
+                    const token = jwt.sign({id}, "jwtSecret", {
+                        expiresIn: 300
+                    });
+
                     req.session.user = result;          // creating a session on request called user
+                    
                     console.log(req.session.user);
-                    res.send(result);
+                    res.json({auth: true, token: token, result: result});   // passing token to front-end
                 }
                 else
-                    res.send({ message: "Wrong username/password combination!"});
+                    res.send({ auth: false, message: "Wrong username/password combination!"});
             });
         }
         else
         {
-            res.send({ message: "User doesn't exist!" });
+            res.send({ auth: false, message: "User doesn't exist!" });
         }
     });
 });
